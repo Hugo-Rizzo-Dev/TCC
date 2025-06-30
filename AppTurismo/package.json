@@ -1,0 +1,26 @@
+{
+  "name": "touristshareapp",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start:app": "expo start",
+    "start:api": "node server.js",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.0.0",
+    "expo": "~53.0.13",
+    "expo-status-bar": "~2.2.3",
+    "express": "^5.1.0",
+    "mssql": "^11.0.1",
+    "react": "19.0.0",
+    "react-native": "0.79.4"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
+  }
+}
