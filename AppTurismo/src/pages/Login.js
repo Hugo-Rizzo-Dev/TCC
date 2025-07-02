@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useContext } from "react";
+import { AuthContext } from "../context/AuthContext";
 import {
   View,
   TextInput,
@@ -12,6 +13,7 @@ import {
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const { login } = useContext(AuthContext);
 
   const handleLogin = async () => {
     if (!email || !senha) {
@@ -26,7 +28,7 @@ export default function LoginScreen({ navigation }) {
       const data = await response.json();
 
       if (response.ok) {
-        navigation.replace("Feed", { user: data.user });
+        await login(data.user);
       } else {
         Alert.alert("Erro", data.message);
       }
@@ -62,19 +64,6 @@ export default function LoginScreen({ navigation }) {
         <Button
           title="Criar uma conta"
           onPress={() => navigation.navigate("Cadastro")}
-        />
-      </View>
-
-      {/* Botão temporario*/}
-      <View style={{ marginTop: 10 }}>
-        <Button
-          title="Testar Editar Perfil"
-          color="#888"
-          onPress={() =>
-            navigation.navigate("EditarPerfil", {
-              userId: "5D7402E9-51A9-420F-96BC-1DB434CB399F", // ← troque pelo seu UUID
-            })
-          }
         />
       </View>
     </ScrollView>

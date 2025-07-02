@@ -179,6 +179,32 @@ app.post("/login", async (req, res) => {
   }
 });
 
+//Foto Perfil
+
+app.put("/users/:id/avatar", upload.single("avatar"), async (req, res) => {
+  const { id } = req.params;
+  if (!req.file) return res.status(400).json({ message: "Foto obrigatória" });
+
+  const fotoUrl = `http://10.0.2.2:3000/uploads/${req.file.filename}`;
+
+  try {
+    const pool = await poolPromise;
+    await pool
+      .request()
+      .input("id", sql.UniqueIdentifier, id)
+      .input("fotoPerfil", sql.NVarChar, fotoUrl).query(`
+        UPDATE dbo.Usuarios
+        SET fotoPerfil = @fotoPerfil
+        WHERE id = @id
+      `);
+
+    res.json({ message: "Foto atualizada", fotoPerfil: fotoUrl });
+  } catch (err) {
+    console.error("Erro ao salvar foto:", err);
+    res.status(500).json({ message: "Erro interno" });
+  }
+});
+
 /* FEED DE POSTES */
 // POST /posts  (criar)
 app.post("/posts", upload.single("foto"), async (req, res) => {
@@ -219,20 +245,230 @@ app.post("/posts", upload.single("foto"), async (req, res) => {
 });
 
 // GET /posts  (feed público – últimos primeiro)
-app.get("/posts", async (_req, res) => {
+app.get("/posts", async (req, res) => {
+  const uid = req.query.uid || "00000000-0000-0000-0000-000000000000"; // caso não mande uid
   try {
     const pool = await poolPromise;
-    const r = await pool.request().query(`
-      SELECT  p.id, p.imagemUrl, p.legenda, p.createdAt, p.likes,
-              u.nome, u.sobrenome, u.fotoPerfil
-      FROM dbo.Posts p
-      JOIN dbo.Usuarios u ON u.id = p.usuarioId
-      ORDER BY p.createdAt DESC;
-    `);
-    res.json(r.recordset);
+    const posts = await pool.request().input("uid", sql.UniqueIdentifier, uid)
+      .query(`
+        SELECT  p.id, p.imagemUrl, p.legenda, p.createdAt,
+                (SELECT COUNT(*) FROM dbo.PostLikes pl WHERE pl.postId = p.id) AS likes,
+                (SELECT COUNT(*) FROM dbo.Comentarios c  WHERE c.postId  = p.id) AS comments,
+                CASE WHEN EXISTS (SELECT 1 FROM dbo.PostLikes pl
+                                  WHERE pl.postId = p.id AND pl.usuarioId = @uid)
+                     THEN 1 ELSE 0 END AS curtiu,
+                u.id   AS autorId, u.nome, u.sobrenome, u.fotoPerfil
+        FROM dbo.Posts p
+        JOIN dbo.Usuarios u ON u.id = p.usuarioId
+        ORDER BY p.createdAt DESC;
+      `);
+    res.json(posts.recordset);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Erro interno" });
   }
+});
+
+//GET Posts por usuário
+app.get("/users/:id/posts", async (req, res) => {
+  const { id } = req.params; // usuário que estou vendo
+  const uid = req.query.uid || id; // quem está logado (p/ marcar curtiu)
+  try {
+    const pool = await poolPromise;
+    const posts = await pool
+      .request()
+      .input("uid", sql.UniqueIdentifier, uid)
+      .input("id", sql.UniqueIdentifier, id).query(`
+        SELECT  p.id, p.imagemUrl, p.legenda, p.createdAt,
+                (SELECT COUNT(*) FROM dbo.PostLikes pl WHERE pl.postId = p.id) AS likes,
+                (SELECT COUNT(*) FROM dbo.Comentarios c  WHERE c.postId  = p.id) AS comments,
+                CASE WHEN EXISTS (SELECT 1 FROM dbo.PostLikes pl
+                                  WHERE pl.postId = p.id AND pl.usuarioId = @uid)
+                     THEN 1 ELSE 0 END AS curtiu,
+                u.id AS autorId, u.nome, u.sobrenome, u.fotoPerfil
+        FROM dbo.Posts p
+        JOIN dbo.Usuarios u ON u.id = p.usuarioId
+        WHERE p.usuarioId = @id
+        ORDER BY p.createdAt DESC;
+      `);
+    res.json(posts.recordset);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erro interno" });
+  }
+});
+
+/*SEGUIDORES*/
+
+// Seguir
+app.post("/follow", async (req, res) => {
+  const { seguidorId, seguidoId } = req.body;
+  if (!seguidorId || !seguidoId)
+    return res.status(400).json({ message: "Ids obrigatórios" });
+
+  try {
+    const pool = await poolPromise;
+    await pool
+      .request()
+      .input("seguidorId", sql.UniqueIdentifier, seguidorId)
+      .input("seguidoId", sql.UniqueIdentifier, seguidoId)
+      .query(
+        `INSERT INTO dbo.Seguidores(seguidorId, seguidoId) VALUES (@seguidorId,@seguidoId)`
+      );
+
+    res.json({ message: "Agora você segue este usuário" });
+  } catch (err) {
+    if (err.number === 2627) {
+      return res.status(409).json({ message: "Você já segue esse usuário" });
+    }
+    console.error(err);
+    res.status(500).json({ message: "Erro interno" });
+  }
+});
+
+// Deixar de seguir
+app.delete("/follow", async (req, res) => {
+  const { seguidorId, seguidoId } = req.body;
+  try {
+    const pool = await poolPromise;
+    await pool
+      .request()
+      .input("seguidorId", sql.UniqueIdentifier, seguidorId)
+      .input("seguidoId", sql.UniqueIdentifier, seguidoId)
+      .query(
+        `DELETE FROM dbo.Seguidores WHERE seguidorId=@seguidorId AND seguidoId=@seguidoId`
+      );
+    res.json({ message: "Deixou de seguir" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erro interno" });
+  }
+});
+
+// Contagem de seguidores
+app.get("/users/:id/followers/count", async (req, res) => {
+  const { id } = req.params;
+  const pool = await poolPromise;
+  const r = await pool
+    .request()
+    .input("id", sql.UniqueIdentifier, id)
+    .query(`SELECT COUNT(*) AS total FROM dbo.Seguidores WHERE seguidoId=@id`);
+  res.json({ total: r.recordset[0].total });
+});
+
+// Contagem de seguidos
+app.get("/users/:id/following/count", async (req, res) => {
+  const { id } = req.params;
+  const pool = await poolPromise;
+  const r = await pool
+    .request()
+    .input("id", sql.UniqueIdentifier, id)
+    .query(`SELECT COUNT(*) AS total FROM dbo.Seguidores WHERE seguidorId=@id`);
+  res.json({ total: r.recordset[0].total });
+});
+
+// Verificar se ja segue
+app.get("/follow/status", async (req, res) => {
+  const { seguidorId, seguidoId } = req.query;
+  const pool = await poolPromise;
+  const r = await pool
+    .request()
+    .input("seguidorId", sql.UniqueIdentifier, seguidorId)
+    .input("seguidoId", sql.UniqueIdentifier, seguidoId)
+    .query(
+      `SELECT 1 FROM dbo.Seguidores WHERE seguidorId=@seguidorId AND seguidoId=@seguidoId`
+    );
+  res.json({ following: r.recordset.length > 0 });
+});
+
+/* Curtidas */
+
+// curtir
+app.post("/posts/:postId/like", async (req, res) => {
+  const { postId } = req.params;
+  const { usuarioId } = req.body;
+
+  try {
+    const pool = await poolPromise;
+    await pool
+      .request()
+      .input("postId", sql.UniqueIdentifier, postId)
+      .input("usuarioId", sql.UniqueIdentifier, usuarioId).query(`
+        IF NOT EXISTS (SELECT 1 FROM dbo.PostLikes
+                       WHERE postId = @postId AND usuarioId = @usuarioId)
+        BEGIN
+          INSERT dbo.PostLikes (postId, usuarioId) VALUES (@postId, @usuarioId);
+        END
+      `);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erro interno" });
+  }
+});
+
+// remover like
+app.delete("/posts/:postId/like", async (req, res) => {
+  const { postId } = req.params;
+  const { usuarioId } = req.body;
+
+  try {
+    const pool = await poolPromise;
+    await pool
+      .request()
+      .input("postId", sql.UniqueIdentifier, postId)
+      .input("usuarioId", sql.UniqueIdentifier, usuarioId).query(`
+        DELETE dbo.PostLikes
+        WHERE postId = @postId AND usuarioId = @usuarioId
+      `);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erro interno" });
+  }
+});
+
+/* Comentarios */
+
+// listar comentários de um post
+app.get("/posts/:postId/comments", async (req, res) => {
+  const { postId } = req.params;
+  const pool = await poolPromise;
+  const r = await pool.request().input("postId", sql.UniqueIdentifier, postId)
+    .query(`
+            SELECT c.id, c.texto, c.createdAt,
+                   u.id   AS autorId, u.nome, u.sobrenome, u.fotoPerfil
+            FROM dbo.Comentarios c
+            JOIN dbo.Usuarios    u ON u.id = c.usuarioId
+            WHERE c.postId = @postId
+            ORDER BY c.createdAt ASC
+          `);
+  res.json(r.recordset);
+});
+
+// inserir comentário
+app.post("/posts/:postId/comments", async (req, res) => {
+  const { postId } = req.params;
+  const { usuarioId, texto } = req.body;
+
+  if (!texto?.trim()) {
+    return res.status(400).json({ message: "Comentário vazio" });
+  }
+
+  const pool = await poolPromise;
+  await pool
+    .request()
+    .input("id", sql.UniqueIdentifier, sql.guid())
+    .input("postId", sql.UniqueIdentifier, postId)
+    .input("usuarioId", sql.UniqueIdentifier, usuarioId)
+    .input("texto", sql.NVarChar, texto.trim()).query(`
+      INSERT dbo.Comentarios (id, postId, usuarioId, texto, createdAt)
+      VALUES (@id, @postId, @usuarioId, @texto, GETUTCDATE())
+    `);
+
+  res.status(201).json({ ok: true });
 });
 
 // start

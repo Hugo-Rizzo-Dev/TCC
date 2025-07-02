@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useContext } from "react";
 import {
   View,
   FlatList,
@@ -11,31 +11,107 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 
-export default function Feed({ navigation, route }) {
-  const { user } = route.params;
+import { AuthContext } from "../context/AuthContext";
+import ImageModal from "../components/ImageModal";
+
+export default function Feed({ navigation }) {
+  const { user } = useContext(AuthContext);
+
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [liked, setLiked] = useState({});
+  const [modalUri, setModalUri] = useState(null);
 
+  /* ----------- carrega feed ----------- */
   const fetchPosts = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const r = await fetch("http://10.0.2.2:3000/posts");
-      const data = await r.json();
-      setPosts(data);
-    } catch {
+      const r = await fetch(`http://10.0.2.2:3000/posts?uid=${user.id}`);
+      const arr = await r.json();
+      setPosts(arr);
+
+      const curti = {};
+      arr.forEach((p) => {
+        if (p.curtiu) curti[p.id] = true;
+      });
+      setLiked(curti);
     } finally {
       setLoading(false);
     }
   };
 
+  /* ---------- curtir / descurtir ---------- */
+  const toggleLike = async (postId) => {
+    const jaCurti = liked[postId];
+
+    await fetch(`http://10.0.2.2:3000/posts/${postId}/like`, {
+      method: jaCurti ? "DELETE" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuarioId: user.id }),
+    });
+
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId ? { ...p, likes: p.likes + (jaCurti ? -1 : +1) } : p
+      )
+    );
+    setLiked((prev) => ({ ...prev, [postId]: !jaCurti }));
+  };
+
+  /* ---------- carrega ao focar ---------- */
   useFocusEffect(
     useCallback(() => {
       fetchPosts();
     }, [])
   );
 
-  const onRefresh = () => fetchPosts();
+  /* ---------- render de cada post ---------- */
+  const renderItem = ({ item }) => (
+    <View style={{ marginBottom: 30 }}>
+      {/* cabeçalho */}
+      <TouchableOpacity
+        style={styles.head}
+        activeOpacity={0.7}
+        onPress={() => navigation.navigate("Profile", { userId: item.autorId })}
+      >
+        <Image source={{ uri: item.fotoPerfil }} style={styles.avatar} />
+        <Text style={styles.author}>
+          {item.nome} {item.sobrenome}
+        </Text>
+      </TouchableOpacity>
 
+      {/* imagem */}
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => setModalUri(item.imagemUrl)}
+      >
+        <Image source={{ uri: item.imagemUrl }} style={styles.photo} />
+      </TouchableOpacity>
+
+      {/* ações */}
+      <View style={styles.actions}>
+        <TouchableOpacity onPress={() => toggleLike(item.id)}>
+          <Ionicons
+            name={liked[item.id] ? "thumbs-up" : "thumbs-up-outline"}
+            size={24}
+            color={liked[item.id] ? "#2196f3" : "#444"}
+          />
+        </TouchableOpacity>
+        <Text style={styles.likesTxt}>{item.likes ?? 0}</Text>
+
+        <TouchableOpacity
+          style={{ marginLeft: 20 }}
+          onPress={() => navigation.navigate("Comments", { postId: item.id })}
+        >
+          <Ionicons name="chatbubble-outline" size={22} color="#444" />
+        </TouchableOpacity>
+      </View>
+
+      {item.legenda ? <Text>{item.legenda}</Text> : null}
+    </View>
+  );
+
+  /* ---------- UI ---------- */
   return (
     <View style={{ flex: 1 }}>
       <FlatList
@@ -43,42 +119,17 @@ export default function Feed({ navigation, route }) {
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 12 }}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={onRefresh} />
+          <RefreshControl refreshing={loading} onRefresh={fetchPosts} />
         }
-        renderItem={({ item }) => (
-          <View style={{ marginBottom: 30 }}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                marginBottom: 6,
-              }}
-            >
-              <Image
-                source={{ uri: item.fotoPerfil }}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  backgroundColor: "#ccc",
-                }}
-              />
-              <Text style={{ marginLeft: 8, fontWeight: "600" }}>
-                {item.nome} {item.sobrenome}
-              </Text>
-            </View>
-
-            <Image
-              source={{ uri: item.imagemUrl }}
-              style={{ height: 300, borderRadius: 8, backgroundColor: "#eee" }}
-            />
-
-            {item.legenda ? <Text>{item.legenda}</Text> : null}
-          </View>
-        )}
+        renderItem={renderItem}
       />
 
-      {/* Botão flutuante para criar novo post */}
+      <ImageModal
+        visible={!!modalUri}
+        uri={modalUri}
+        onClose={() => setModalUri(null)}
+      />
+
       <TouchableOpacity
         style={styles.fab}
         onPress={() => navigation.navigate("NovoPost", { userId: user.id })}
@@ -89,7 +140,17 @@ export default function Feed({ navigation, route }) {
   );
 }
 
+/* ---------- estilos ---------- */
 const styles = StyleSheet.create({
+  head: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
+  avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#ccc" },
+  author: { marginLeft: 8, fontWeight: "600" },
+
+  photo: { height: 300, borderRadius: 8, backgroundColor: "#eee" },
+
+  actions: { flexDirection: "row", alignItems: "center", marginTop: 6 },
+  likesTxt: { marginLeft: 4, fontWeight: "500" },
+
   fab: {
     position: "absolute",
     right: 20,
