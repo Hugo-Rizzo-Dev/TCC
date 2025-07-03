@@ -105,6 +105,7 @@ export default function Feed({ navigation }) {
         >
           <Ionicons name="chatbubble-outline" size={22} color="#444" />
         </TouchableOpacity>
+        <Text style={styles.countTxt}>{item.comments ?? 0}</Text>
       </View>
 
       {item.legenda ? <Text>{item.legenda}</Text> : null}

@@ -1,4 +1,5 @@
 require("dotenv").config();
+const { v4: uuidv4 } = require("uuid");
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
@@ -457,18 +458,23 @@ app.post("/posts/:postId/comments", async (req, res) => {
     return res.status(400).json({ message: "Comentário vazio" });
   }
 
-  const pool = await poolPromise;
-  await pool
-    .request()
-    .input("id", sql.UniqueIdentifier, sql.guid())
-    .input("postId", sql.UniqueIdentifier, postId)
-    .input("usuarioId", sql.UniqueIdentifier, usuarioId)
-    .input("texto", sql.NVarChar, texto.trim()).query(`
-      INSERT dbo.Comentarios (id, postId, usuarioId, texto, createdAt)
-      VALUES (@id, @postId, @usuarioId, @texto, GETUTCDATE())
-    `);
+  try {
+    const pool = await poolPromise;
+    await pool
+      .request()
+      .input("id", sql.UniqueIdentifier, uuidv4())
+      .input("postId", sql.UniqueIdentifier, postId)
+      .input("usuarioId", sql.UniqueIdentifier, usuarioId)
+      .input("texto", sql.NVarChar, texto.trim()).query(`
+        INSERT dbo.Comentarios (id, postId, usuarioId, texto, createdAt)
+        VALUES (@id, @postId, @usuarioId, @texto, GETUTCDATE())
+      `);
 
-  res.status(201).json({ ok: true });
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erro interno" });
+  }
 });
 
 // start
